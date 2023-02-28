@@ -1,0 +1,114 @@
+params.runid = 'test'
+params.directory = "s3://ILLUMINA/${params.runid}"
+params.input = 's3://RawData/E*_{1,2}.fq.gz'
+params.reference = "s3://ILLUMINA/${params.runid}/reference"
+params.index = "s3://ILLUMINA/${params.runid}/index"
+
+pair_ch = Channel.fromFilePairs(params.input)
+
+process star {
+
+  errorStrategy 'ignore'
+
+  publishDir params.directory, mode:'copy'
+
+  label 'star'
+
+  tag "_${String.format("%06d", task.index)}_${params.runid}"
+
+  input:
+  tuple sample_id, file(reads) from pair_ch
+  path index from params.index
+  path genome from params.reference
+
+  output:
+  tuple val("${String.format("%06d", task.index)}"), path("star/${String.format("%06d", task.index)}") into star_ch
+
+  script:
+  def idx = String.format("%06d", task.index)
+  """
+  mkdir -p star/${idx}
+  cd star/${idx}
+  STAR --runMode genomeGenerate --genomeDir ../../${index} --genomeFastaFiles ../../${genome}/reference.fa --sjdbGTFfile ../../${genome}/reference.gtf --sjdbOverhang 149
+  STAR --genomeDir ../../${index} --readFilesIn ../../${reads[0]} ../../${reads[1]} --twopassMode Basic --outSAMstrandField intronMotif --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --runThreadN 12
+  cd ../..
+  """
+
+}
+
+process samtools {
+
+  errorStrategy 'ignore'
+
+  publishDir params.directory, mode:'copy'
+
+  label 'nanopanel2'
+
+  tag "_${idx}_${params.runid}"
+
+  input:
+  tuple val(idx), path(star) from star_ch
+
+  output:
+  tuple val(idx), path("samtools/${idx}") into samtools_ch
+
+  script:
+  """
+  mkdir -p samtools/${idx}
+  samtools index ${star}/Aligned.sortedByCoord.out.bam samtools/${idx}/sorted.bam.bai
+  samtools stats ${star}/Aligned.sortedByCoord.out.bam | grep ^SN | cat > samtools/${idx}/stats.text
+  samtools sort -n -o samtools/${idx}/Aligned_sortedByCoord-qsort.bam ${star}/Aligned.sortedByCoord.out.bam
+  """
+
+}
+
+process bedtools {
+
+  errorStrategy 'ignore'
+
+  publishDir params.directory, mode:'copy'
+
+  label 'bedtools'
+
+  tag "_${idx}_${params.runid}"
+
+  input:
+  tuple val(idx), path(samtools) from samtools_ch
+
+  output:
+  path("bedtools/${idx}-1.fq") into fq1_ch
+  path("bedtools/${idx}-2.fq") into fq2_ch
+
+  script:
+  """
+  mkdir -p bedtools
+  bedtools bamtofastq -i ${samtools}/Aligned_sortedByCoord-qsort.bam -fq bedtools/${idx}-1.fq -fq2 bedtools/${idx}-2.fq
+  """
+
+}
+
+process trinity {
+
+  errorStrategy 'ignore'
+
+  publishDir params.directory, mode:'copy'
+
+  label 'trinity'
+
+  tag "_${params.runid}"
+
+  input:
+  path(fq1) from fq1_ch.toSortedList()
+  path(fq2) from fq2_ch.toSortedList()
+
+  output:
+  path("trinity") into trinity_ch
+
+  script:
+  """
+  mkdir -p trinity
+  Trinity --seqType fq --left ${fq1.join(',')} --right ${fq2.join(',')} --max_memory 20G --CPU 6 --output ./trinity/trinity --full_cleanup
+  """
+
+}
+
