@@ -30,7 +30,7 @@ process star {
   mkdir -p star/${idx}
   cd star/${idx}
   STAR --runMode genomeGenerate --genomeDir ../../${index} --genomeFastaFiles ../../${genome}/reference.fa --sjdbGTFfile ../../${genome}/reference.gtf --sjdbOverhang 149
-  STAR --genomeDir ../../${index} --readFilesIn ../../${reads[0]} ../../${reads[1]} --twopassMode Basic --outSAMstrandField intronMotif --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --runThreadN 12
+  STAR --genomeDir ../../${index} --readFilesIn ../../${reads[0]} ../../${reads[1]} --twopassMode Basic --outSAMstrandField intronMotif --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --runThreadN 12 --outFileNamePrefix /input/../result/dsRNA_
   cd ../..
   """
 
